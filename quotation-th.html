@@ -5753,10 +5753,9 @@ document.addEventListener('DOMContentLoaded', function(){
 <!-- ========== Validation Before Next Step ========== -->
 <script>
 /**
- * เช็คข้อมูลบังคับก่อนกด "ถัดไป: พรีวิว"
- * บังคับทุกช่อง ยกเว้น: หมายเหตุ (invNote) + ลิงก์โพสต์
- * + ต้องมีรายการค่าตอบแทนอย่างน้อย 1 รายการ (ชื่อ + จำนวน + ราคา)
- * + ต้องมีลายเซ็น
+ * เช็คข้อมูลบังคับก่อนกด "ถัดไป: พรีวิว" (QUOTATION)
+ * ไม่เช็คบัญชีธนาคาร (ใบเสนอราคาไม่เก็บ) — จะกรอกตอนทำใบแจ้งหนี้
+ * รายการค่าตอบแทนเช็คตาม payType (cash / credit / barter)
  */
 function validateBeforeNext(){
   var errors = [];
@@ -5773,54 +5772,60 @@ function validateBeforeNext(){
     errors.push({field:'addrSearch', label:'ตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์ (ค้นหาที่อยู่)'});
   }
 
-  // ── 2. บัญชีธนาคาร ──
-  var bankName = v('bankName');
-  if(!bankName){
-    errors.push({field:'bankName', label:'ธนาคาร'});
-  } else if(bankName === 'อื่นๆ' && !v('bankNameOther')){
-    errors.push({field:'bankNameOther', label:'ชื่อธนาคาร (ระบุ)'});
-  }
-  if(!v('bankAccName')) errors.push({field:'bankAccName', label:'ชื่อบัญชี'});
-  if(!v('bankAccNo'))   errors.push({field:'bankAccNo',   label:'เลขบัญชี'});
-  if(!v('bankBranch'))  errors.push({field:'bankBranch',  label:'สาขา'});
+  // ── 2. รายการค่าตอบแทน (เช็คตาม payType) ──
+  var payType = v('payType') || 'cash';
 
-  // ── 3. รายการค่าตอบแทน (อย่างน้อย 1 แถวที่มีข้อมูลครบ) ──
-  var itemsBody = document.getElementById('itemsBody');
-  if(itemsBody){
-    var rows = itemsBody.children;
-    var hasValidRow = false;
-    for(var i=0; i<rows.length; i++){
-      var inputs = rows[i].querySelectorAll('input');
-      var desc='', qty='', price='';
-      for(var j=0; j<inputs.length; j++){
-        if(inputs[j].type === 'number'){
-          if(!qty) qty = inputs[j].value;
-          else if(!price) price = inputs[j].value;
-        } else if(inputs[j].type !== 'hidden' && !inputs[j].readOnly){
-          if(!desc) desc = inputs[j].value;
+  if(payType === 'credit'){
+    // KONVY Credit: ต้องมี JobDesc + MemberId + Value
+    if(!v('creditJobDesc'))   errors.push({field:'creditJobDesc',   label:'รายละเอียดงาน (KONVY Credit)'});
+    if(!v('creditMemberId'))  errors.push({field:'creditMemberId',  label:'KONVY Member ID'});
+    var cVal = Number(v('creditValue'));
+    if(!cVal || cVal <= 0)    errors.push({field:'creditValue',     label:'มูลค่า KONVY Credit (ต้องมากกว่า 0)'});
+
+  } else if(payType === 'barter'){
+    // Barter: ต้องมี JobDesc + Item + Value
+    if(!v('barterJobDesc'))   errors.push({field:'barterJobDesc',   label:'รายละเอียดงาน (Barter)'});
+    if(!v('barterItem'))      errors.push({field:'barterItem',      label:'ชื่อสินค้า Barter'});
+    var bVal = Number(v('barterValue'));
+    if(!bVal || bVal <= 0)    errors.push({field:'barterValue',     label:'มูลค่าสินค้า Barter (ต้องมากกว่า 0)'});
+
+  } else {
+    // Cash/Transfer: ต้องมีอย่างน้อย 1 แถวในตารางที่มีข้อมูลครบ
+    var itemsBody = document.getElementById('itemsBody');
+    if(itemsBody){
+      var rows = itemsBody.children;
+      var hasValidRow = false;
+      for(var i=0; i<rows.length; i++){
+        var inputs = rows[i].querySelectorAll('input');
+        var desc='', qty='', price='';
+        for(var j=0; j<inputs.length; j++){
+          if(inputs[j].type === 'number'){
+            if(!qty) qty = inputs[j].value;
+            else if(!price) price = inputs[j].value;
+          } else if(inputs[j].type !== 'hidden' && !inputs[j].readOnly){
+            if(!desc) desc = inputs[j].value;
+          }
+        }
+        if(desc.trim() && Number(qty) > 0 && Number(price) > 0){
+          hasValidRow = true; break;
         }
       }
-      if(desc.trim() && Number(qty) > 0 && Number(price) > 0){
-        hasValidRow = true; break;
+      if(!hasValidRow){
+        errors.push({field:'itemsBody', label:'รายการค่าตอบแทน (ต้องมีอย่างน้อย 1 รายการ: ชื่อ + จำนวน + ราคา)'});
       }
     }
-    if(!hasValidRow){
-      errors.push({field:'itemsBody', label:'รายการค่าตอบแทน (ต้องมีอย่างน้อย 1 รายการ: ชื่อ + จำนวน + ราคา)'});
-    }
   }
 
-  // ── 4. กำหนดการโพสต์ ──
-  if(typeof currentDocType === 'undefined' || currentDocType !== 'inv'){
-    if(!v('quotPostDate')) errors.push({field:'quotPostDate', label:'วันที่กำหนดโพสต์'});
-    var plat = v('quotPostPlatform');
-    if(!plat){
-      errors.push({field:'quotPostPlatform', label:'แพลตฟอร์มที่จะโพสต์'});
-    } else if(plat === 'อื่นๆ' && !v('quotPostPlatformOther')){
-      errors.push({field:'quotPostPlatformOther', label:'แพลตฟอร์ม (ระบุ)'});
-    }
+  // ── 3. กำหนดการโพสต์ ──
+  if(!v('quotPostDate')) errors.push({field:'quotPostDate', label:'วันที่กำหนดโพสต์'});
+  var plat = v('quotPostPlatform');
+  if(!plat){
+    errors.push({field:'quotPostPlatform', label:'แพลตฟอร์มที่จะโพสต์'});
+  } else if(plat === 'อื่นๆ' && !v('quotPostPlatformOther')){
+    errors.push({field:'quotPostPlatformOther', label:'แพลตฟอร์ม (ระบุ)'});
   }
 
-  // ── 5. ลายเซ็น ──
+  // ── 4. ลายเซ็น ──
   if(typeof sigData === 'undefined' || !sigData){
     errors.push({field:'sigCanvas', label:'ลายเซ็น (วาด หรืออัปโหลดรูป)'});
   }
